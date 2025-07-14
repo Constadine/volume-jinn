@@ -25,7 +25,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     /start handler: introduces the bot.
     """
     msg = (
-        "👋 Hi! I can fetch your last workout from Hevy and generate a new plan with a 5% volume increase.\n"
+        "💪🏼 Hi! I can fetch your last workout from Hevy and generate a new plan with a 5% volume increase.\n"
         "Use the /plan command to get started."
     )
     await update.message.reply_text(msg)
