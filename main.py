@@ -32,45 +32,105 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    /plan handler: fetch last workout, compute plans, and reply.
+    /plan handler: optionally filter last workout by title, build a +5 % plan,
+    and show per-exercise + overall volumes (both requested and actually produced).
+
+    Usage examples
+    --------------
+    /plan                 → latest workout of any title
+    /plan Pull Day        → latest workout with title "Pull Day"
     """
     if not HEVY_API_KEY:
-        await update.message.reply_text("❌ Server error: HEVY_API_KEY not set."
-        )
+        await update.message.reply_text("❌ Server error: HEVY_API_KEY not set.")
         return
 
-    try:
-        # Fetch and structure workout data
-        last_workout = tools.fetch_last_workout(HEVY_API_KEY)
-        exercises = tools.structure_workout_data(last_workout)
+    workout_title = " ".join(context.args).strip() or None   # "" → None
 
-        if not exercises:
-            await update.message.reply_text("No exercises found in your last workout.")
+    try:
+        last_workout = tools.fetch_last_workout(
+            HEVY_API_KEY,
+            workout_title=workout_title
+        )
+        if not last_workout:
+            await update.message.reply_text(
+                "No workout found "
+                f'{"with that title " if workout_title else ""}in your history.'
+            )
             return
 
-        # For each exercise, compute optimized plan
+        exercises = tools.structure_workout_data(last_workout)
+        if not exercises:
+            await update.message.reply_text("No exercises found in that workout.")
+            return
+
+        # Running totals for the final summary (exact, not theoretical)
+        total_prev_vol     = 0
+        total_target_vol   = 0
+        total_exact_new_vol = 0
+
         for ex in exercises:
-            name = ex['exercise']
-            sets = ex['sets']
-            prev_vol = ex['volume']
-            opts = tools.get_optimized_options({'exercise': name, 'sets': sets}, 0.05)
-            new_vol = opts.get('target_volume', 0)
-            pct_change = ((new_vol / prev_vol - 1) * 100) if prev_vol else 0
+            name       = ex['exercise']
+            sets       = ex['sets']
+            prev_vol   = ex['volume']
 
-            # Build and send the message
+            # Build +5 % plan
+            opts = tools.get_optimized_options(
+                {'exercise': name, 'sets': sets},
+                0.05                     # Ask for +5 % target
+            )
+            target_vol = opts.get('target_volume', 0)
+
+            # ── NEW: calculate the *actual* volume from the generated sets ──
+            exact_new_vol = sum(r * w for r, w in opts.get('final_sets', []))
+
+            # Protect against divide-by-zero in rare edge cases
+            pct_change_target = ((target_vol / prev_vol - 1) * 100) if prev_vol else 0
+            pct_change_exact  = ((exact_new_vol / prev_vol - 1) * 100) if prev_vol else 0
+
+            # Update totals
+            total_prev_vol     += prev_vol
+            total_target_vol   += target_vol
+            total_exact_new_vol += exact_new_vol
+
+            # Build message
             lines = [
-                f"Exercise: {name}",
-                f"Previous Volume: {int(prev_vol)}",
-                f"New Volume: {int(new_vol)} ({pct_change:+.0f}%)",
-                "Plan for today:"
+                f"🏋️‍♂️ *{name}*",
+                f"Prev Vol:     {int(prev_vol)}",
+                f"Target Vol:   {int(target_vol)}  ({pct_change_target:+.0f} %)",
+                f"Exact  Vol:   {int(exact_new_vol)}  ({pct_change_exact:+.0f} %)",
+                "Plan:"
             ]
-            for idx, (reps, weight) in enumerate(opts.get('final_sets', []), start=1):
-                lines.append(f"Set {idx}: {reps}x{weight}")
+            for i, (reps, weight) in enumerate(opts.get('final_sets', []), 1):
+                lines.append(f"  • Set {i}: {reps} × {weight}")
 
-            await update.message.reply_text("\n".join(lines))
+            await update.message.reply_text(
+                "\n".join(lines),
+                parse_mode="Markdown"
+            )
+
+        # ── Summary after all exercises ──────────────────────────────────────
+        if total_prev_vol:
+            pct_change_target_total = ((total_target_vol / total_prev_vol - 1) * 100)
+            pct_change_exact_total  = ((total_exact_new_vol / total_prev_vol - 1) * 100)
+        else:
+            pct_change_target_total = pct_change_exact_total = 0
+
+        summary = [
+            "🧮 *Plan Summary*",
+            f"Prev Total Vol:      {int(total_prev_vol)}",
+            f"Target Total Vol:    {int(total_target_vol)}  ({pct_change_target_total:+.0f} %)",
+            f"Exact  Total Vol:    {int(total_exact_new_vol)}  ({pct_change_exact_total:+.0f} %)"
+        ]
+        await update.message.reply_text("\n".join(summary), parse_mode="Markdown")
+
     except Exception as e:
         logger.error("Error generating plan:", exc_info=e)
-        await update.message.reply_text("⚠️ Failed to generate plan. Please try again later.")
+        await update.message.reply_text(
+            "⚠️ Failed to generate plan. Please try again later."
+        )
+
+
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """

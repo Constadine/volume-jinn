@@ -7,14 +7,36 @@ class ExerciseData(TypedDict):
     sets: List[Tuple[int, float]]
     volume: int
 
-def fetch_last_workout(apikey:str) -> dict:
-    url = "https://api.hevyapp.com/v1/workouts?page=1&pageSize=1"
+def fetch_last_workout(apikey: str, workout_title: Optional[str] = None) -> dict:
+    """
+    Fetch the last workout from Hevy API.
+    If workout_title is provided, returns the most recent workout with that title.
+    Otherwise, returns the most recent workout.
+
+    Parameters:
+    -----------
+    apikey : str
+        Your Hevy API key.
+    workout_title : Optional[str]
+        Title of the workout to filter for.
+
+    Returns:
+    --------
+    dict
+        The workout data.
+    """
+    url = "https://api.hevyapp.com/v1/workouts?page=1"
     headers = {
         "accept": "application/json",
         "api-key": apikey
     }
     response = requests.get(url=url, headers=headers).json()
-    last_workout_data = response['workouts'][0]
+
+    if workout_title:
+        filtered_workouts = [w for w in response['workouts'] if w['title'] == workout_title]
+        last_workout_data = filtered_workouts[0] if filtered_workouts else None
+    else:
+        last_workout_data = response['workouts'][0] if response['workouts'] else None
 
     return last_workout_data
 

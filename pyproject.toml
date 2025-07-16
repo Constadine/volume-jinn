@@ -1,0 +1,12 @@
+[project]
+name = "volume-jinn"
+version = "0.2.0"
+description = "Progressive overload planning made easy."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dotenv>=0.9.9",
+    "requests>=2.32.4",
+    "streamlit>=1.47.0",
+    "telegram>=0.0.1",
+]
