@@ -1,18 +1,21 @@
 import os, streamlit as st, pandas as pd
 from dotenv import load_dotenv
-import tools   # ← the helper functions you already have
+import tools
+from datetime import datetime
 
 load_dotenv()
 
+st.set_page_config(page_title="Volume Jinn", page_icon="🧞")
+
 # ── 1. Ask for the key (once per browser session) ──────────────────────────────
 if "hevy_key" not in st.session_state:
-    st.session_state.hevy_key = ""        # initialise the variable
+    st.session_state.hevy_key = ""
 
-with st.sidebar:                          # sidebar keeps the main UI clean
+with st.sidebar:
     st.markdown("### 🔑 Hevy API Key")
     with st.form(key="key_form", clear_on_submit=False):
         key_input = st.text_input(
-            "Paste your personal key here",
+            "Gimme your key",
             type="password",              # masks the characters
             placeholder="1a...",
         )
@@ -25,6 +28,11 @@ with st.sidebar:                          # sidebar keeps the main UI clean
             else:
                 st.warning("No key entered – you’ll need one to proceed.")
 
+    workout_title = st.text_input("Workout Title (blank = most recent)")
+    vol_bump_pct = st.slider("Volume increase target (%)", 0, 30, 5, step=1) / 100
+
+
+
 apikey = st.session_state.hevy_key or os.getenv("HEVY_API_KEY", "")
 
 # ── 2. Refuse to proceed without a key ─────────────────────────────────────────
@@ -35,7 +43,6 @@ if not apikey:
 st.title("Volume Jinn 🧞")
 
 # Optional: let the user decide which previous workout to pull
-workout_title = st.text_input("Workout Title (blank = most recent)")
 
 if apikey is None:
     st.error("Environment variable HEVY_API_KEY not found"); st.stop()
@@ -47,8 +54,10 @@ if not raw_wk:
 
 exercises = tools.structure_workout_data(raw_wk)
 
-st.header(raw_wk["title"])
-vol_bump_pct = st.slider("Volume increase target (%)", 0, 30, 5, step=1) / 100
+created_at = datetime.fromisoformat(raw_wk["created_at"].replace("Z", "+00:00"))
+formatted_time = created_at.strftime("%B %d, %Y - %H:%M")
+st.header(f'{raw_wk["title"]} · {formatted_time}')
+st.markdown("---")
 
 # ──-- One expander per exercise --──
 for ex in exercises:
