@@ -3,7 +3,34 @@ from dotenv import load_dotenv
 import tools   # ← the helper functions you already have
 
 load_dotenv()
-apikey = os.getenv("HEVY_API_KEY")
+
+# ── 1. Ask for the key (once per browser session) ──────────────────────────────
+if "hevy_key" not in st.session_state:
+    st.session_state.hevy_key = ""        # initialise the variable
+
+with st.sidebar:                          # sidebar keeps the main UI clean
+    st.markdown("### 🔑 Hevy API Key")
+    with st.form(key="key_form", clear_on_submit=False):
+        key_input = st.text_input(
+            "Paste your personal key here",
+            type="password",              # masks the characters
+            placeholder="1a...",
+        )
+        submit = st.form_submit_button("Use this key")
+
+        if submit:
+            st.session_state.hevy_key = key_input.strip()
+            if st.session_state.hevy_key:
+                st.success("Key stored for **this session** only.")
+            else:
+                st.warning("No key entered – you’ll need one to proceed.")
+
+apikey = st.session_state.hevy_key or os.getenv("HEVY_API_KEY", "")
+
+# ── 2. Refuse to proceed without a key ─────────────────────────────────────────
+if not apikey:
+    st.stop()     # the sidebar prompt stays visible; nothing else renders
+
 
 st.title("Volume Jinn 🧞")
 
