@@ -37,6 +37,10 @@ apikey = st.session_state.hevy_key or os.getenv("HEVY_API_KEY", "")
 
 # ── 2. Refuse to proceed without a key ─────────────────────────────────────────
 if not apikey:
+    st.info(
+        "Enter your personal Hevy API key in the sidebar to load a workout. "
+        "Your key is stored **only in this browser session** and never logged."
+    )
     st.stop()     # the sidebar prompt stays visible; nothing else renders
 
 
