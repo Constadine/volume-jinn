@@ -30,13 +30,22 @@ def fetch_last_workout(apikey: str, workout_title: Optional[str] = None) -> dict
         "accept": "application/json",
         "api-key": apikey
     }
-    response = requests.get(url=url, headers=headers).json()
+    response = requests.get(url=url, headers=headers)
+
+    if response.status_code == 401:
+        raise ValueError("Invalid API key – Hevy returned 401 Unauthorized")
+    if not response.ok:
+        raise RuntimeError(f"Hevy API error {response.status_code}: {response.text[:120]}")
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise RuntimeError("Hevy response was not JSON, check the key/network") from e
 
     if workout_title:
-        filtered_workouts = [w for w in response['workouts'] if w['title'] == workout_title]
+        filtered_workouts = [w for w in payload['workouts'] if w['title'] == workout_title]
         last_workout_data = filtered_workouts[0] if filtered_workouts else None
     else:
-        last_workout_data = response['workouts'][0] if response['workouts'] else None
+        last_workout_data = payload['workouts'][0] if payload['workouts'] else None
 
     return last_workout_data
 

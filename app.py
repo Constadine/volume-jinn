@@ -52,9 +52,17 @@ if apikey is None:
     st.error("Environment variable HEVY_API_KEY not found"); st.stop()
 
 # Grab the workout and tidy it up
-raw_wk   = tools.fetch_last_workout(apikey, workout_title)
-if not raw_wk:
-    st.warning("No workout found."); st.stop()
+try:
+    raw_wk = tools.fetch_last_workout(apikey, workout_title)
+except ValueError as bad_key:
+    st.error("❌ " + str(bad_key))
+    if st.sidebar.button("🔄 Clear stored key"):
+        st.session_state.pop("hevy_key", None)
+        st.experimental_rerun()
+    st.stop()
+except Exception as err:
+    st.error(f"⚠️ Could not fetch workout – {err}")
+    st.stop()
 
 exercises = tools.structure_workout_data(raw_wk)
 
