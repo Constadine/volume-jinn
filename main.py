@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-import tools
+from hevy import Hevy
 
 # Load environment variables from a .env file if present
 load_dotenv()
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 # Environment variables for Telegram and Hevy API
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 HEVY_API_KEY = os.getenv('HEVY_API_KEY')
+
+hevy = Hevy(apikey=HEVY_API_KEY)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -40,15 +42,10 @@ async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     /plan                 → latest workout of any title
     /plan Pull Day        → latest workout with title "Pull Day"
     """
-    if not HEVY_API_KEY:
-        await update.message.reply_text("❌ Server error: HEVY_API_KEY not set.")
-        return
-
     workout_title = " ".join(context.args).strip() or None   # "" → None
 
     try:
-        last_workout = tools.fetch_last_workout(
-            HEVY_API_KEY,
+        last_workout = hevy.fetch_last_workout(
             workout_title=workout_title
         )
         if not last_workout:
@@ -58,7 +55,7 @@ async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        exercises = tools.structure_workout_data(last_workout)
+        exercises = hevy.structure_workout_data(last_workout)
         if not exercises:
             await update.message.reply_text("No exercises found in that workout.")
             return
@@ -74,7 +71,7 @@ async def plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             prev_vol   = ex['volume']
 
             # Build +5 % plan
-            opts = tools.get_optimized_options(
+            opts = hevy.get_optimized_options(
                 {'exercise': name, 'sets': sets},
                 0.05                     # Ask for +5 % target
             )

@@ -1,7 +1,11 @@
-import os, streamlit as st, pandas as pd
-from dotenv import load_dotenv
-import tools
+import os
 from datetime import datetime
+
+import pandas as pd
+import streamlit as st
+from dotenv import load_dotenv
+
+from hevy import Hevy
 
 load_dotenv()
 
@@ -26,14 +30,11 @@ with st.sidebar:
             if st.session_state.hevy_key:
                 st.success("Key stored for **this session** only.")
             else:
-                st.warning("No key entered – you’ll need one to proceed.")
-
-    workout_title = st.text_input("Workout Title (blank = most recent)")
-    vol_bump_pct = st.slider("Volume increase target (%)", 0, 30, 5, step=1) / 100
-
-
+                st.warning("No key entered - you'll need one to proceed.")
 
 apikey = st.session_state.hevy_key or os.getenv("HEVY_API_KEY", "")
+hevy = Hevy(apikey=apikey)
+
 
 # ── 2. Refuse to proceed without a key ─────────────────────────────────────────
 if not apikey:
@@ -51,31 +52,102 @@ st.title("Volume Jinn 🧞")
 if apikey is None:
     st.error("Environment variable HEVY_API_KEY not found"); st.stop()
 
-# Grab the workout and tidy it up
-try:
-    raw_wk = tools.fetch_last_workout(apikey, workout_title)
-except ValueError as bad_key:
-    st.error("❌ " + str(bad_key))
-    if st.sidebar.button("🔄 Clear stored key"):
-        st.session_state.pop("hevy_key", None)
-        st.experimental_rerun()
-    st.stop()
-except Exception as err:
-    st.error(f"⚠️ Could not fetch workout – {err}")
-    st.stop()
+# ───────────────────────── SIDEBAR ──────────────────────────
+with st.sidebar:
+    search_by = st.radio("Search by", ["Workout", "Exercise"])
+    if search_by == "Workout":
+        all_workouts = hevy.get_all_workouts()
+        workout_title = st.selectbox(
+            "Workout Title (leave empty for most recent)",
+            options=sorted(hevy.get_all_workouts()),
+            index=None,
+            placeholder="(Latest workout)"
+        )
 
-exercises = tools.structure_workout_data(raw_wk)
+        raw_wk = hevy.fetch_last_workout(workout_title or None)
+    else:  # Exercise
+        all_exercises = hevy.get_all_exercises()
+        exercise_titles = st.multiselect(
+            "Exercise Title",
+            options=sorted(all_exercises),
+            default=None
+        )
 
-created_at = datetime.fromisoformat(raw_wk["created_at"].replace("Z", "+00:00"))
-formatted_time = created_at.strftime("%B %d, %Y - %H:%M")
-st.header(f'{raw_wk["title"]} · {formatted_time}')
-st.markdown("---")
+    vol_bump_pct = st.slider(
+        "Volume increase target (%)",
+        0, 20, 5, step=1
+    ) / 100
+# ────────────────────────────────────────────────────────────
+
+
+# ──────────────── FETCH & STRUCTURE DATA ───────────────────
+if search_by == "Workout":
+    # pull the most-recent workout of that title (or latest overall)
+    try:
+        raw_wk = hevy.fetch_last_workout(
+            workout_title or None          # "" → None for “latest”
+        )
+        if not raw_wk:
+            st.warning("No workout found with that title."); st.stop()
+    except Exception as err:
+        st.error(f"⚠️ Could not fetch workout - {err}"); st.stop()
+
+    exercises = hevy.structure_workout_data(raw_wk)
+
+    # pretty header with workout time
+    created_at = datetime.fromisoformat(
+        raw_wk["created_at"].replace("Z", "+00:00")
+    )
+    st.header(f'{raw_wk["title"]} · {created_at:%B %d, %Y – %H:%M}')
+
+else:  # Exercise mode
+    # 1️⃣ nothing chosen yet → ask the user and stop early
+    if not exercise_titles:
+        st.info("👈 Pick at least one exercise to continue.")
+        st.stop()
+
+    # 2️⃣ pull each exercise’s last-session data
+    exercises: list[dict] = []
+    missing:   list[str]  = []
+
+    for title in exercise_titles:
+        try:
+            raw_ex = hevy.get_exercise_last_data(title)
+        except Exception as err:
+            st.error(f"API error while fetching **{title}** – {err}")
+            st.stop()
+
+        if not raw_ex or raw_ex.get("error"):
+            missing.append(title)
+            continue
+
+        exercises.append(hevy.structure_exercise_data(raw_ex))
+
+    # 3️⃣ if none of the chosen items came back with data
+    if not exercises:
+        st.warning("No recent data found for the selected exercise(s).")
+        st.stop()
+
+    # 4️⃣ tell the user which ones were skipped
+    if missing:
+        st.warning("No recent session found for: " + ", ".join(missing))
+
+    # 5️⃣ nice header
+    st.header(
+        "Last session · " +
+        (", ".join(exercise_titles) if len(exercise_titles) <= 3 else
+         f"{len(exercise_titles)} exercises")
+    )
+
+
+# ────────────────────────────────────────────────────────────
+
 
 # ──-- One expander per exercise --──
 for ex in exercises:
     name          = ex["exercise"]
     original_sets = ex["sets"]           # list[(reps, kg)]
-    opts = tools.get_optimized_options(
+    opts = hevy.get_optimized_options(
         {"exercise": name, "sets": original_sets},
         volume_perc = vol_bump_pct          # e.g. +5 %
     )
