@@ -6,6 +6,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from hevy import Hevy
+from datatypes import ExerciseData
 
 load_dotenv()
 
@@ -50,7 +51,8 @@ st.title("Volume Jinn 🧞")
 # Optional: let the user decide which previous workout to pull
 
 if apikey is None:
-    st.error("Environment variable HEVY_API_KEY not found"); st.stop()
+    st.error("Environment variable HEVY_API_KEY not found")
+    st.stop()
 
 # ───────────────────────── SIDEBAR ──────────────────────────
 with st.sidebar:
@@ -88,9 +90,11 @@ if search_by == "Workout":
             workout_title or None          # "" → None for “latest”
         )
         if not raw_wk:
-            st.warning("No workout found with that title."); st.stop()
+            st.warning("No workout found with that title.")
+            st.stop()
     except Exception as err:
-        st.error(f"⚠️ Could not fetch workout - {err}"); st.stop()
+        st.error(f"⚠️ Could not fetch workout - {err}")
+        st.stop()
 
     exercises = hevy.structure_workout_data(raw_wk)
 
@@ -101,13 +105,13 @@ if search_by == "Workout":
     st.header(f'{raw_wk["title"]} · {created_at:%B %d, %Y – %H:%M}')
 
 else:  # Exercise mode
-    # 1️⃣ nothing chosen yet → ask the user and stop early
+    # 1 nothing chosen yet → ask the user and stop early
     if not exercise_titles:
         st.info("👈 Pick at least one exercise to continue.")
         st.stop()
 
-    # 2️⃣ pull each exercise’s last-session data
-    exercises: list[dict] = []
+    # 2 pull each exercise’s last-session data
+    exercises: list[ExerciseData] = []
     missing:   list[str]  = []
 
     for title in exercise_titles:
@@ -123,16 +127,16 @@ else:  # Exercise mode
 
         exercises.append(hevy.structure_exercise_data(raw_ex))
 
-    # 3️⃣ if none of the chosen items came back with data
+    # 3 if none of the chosen items came back with data
     if not exercises:
         st.warning("No recent data found for the selected exercise(s).")
         st.stop()
 
-    # 4️⃣ tell the user which ones were skipped
+    # 4 tell me which ones were skipped
     if missing:
         st.warning("No recent session found for: " + ", ".join(missing))
 
-    # 5️⃣ nice header
+    # 5 header
     st.header(
         "Last session · " +
         (", ".join(exercise_titles) if len(exercise_titles) <= 3 else
@@ -146,12 +150,12 @@ else:  # Exercise mode
 # ──-- One expander per exercise --──
 for ex in exercises:
     name          = ex["exercise"]
-    original_sets = ex["sets"]           # list[(reps, kg)]
+    original_sets = ex["sets"]
     opts = hevy.get_optimized_options(
         {"exercise": name, "sets": original_sets},
         volume_perc = vol_bump_pct          # e.g. +5 %
     )
-    plan_sets    = opts["final_sets"]       # [(reps, kg), …] sized & bumped
+    plan_sets    = opts["final_sets"]
     target_vol   = int(opts["target_volume"])
     baseline_vol = int(ex["volume"])        # what I lifted last time
 
@@ -173,11 +177,11 @@ for ex in exercises:
             key=f"de_{name}"
         )
 
-        # 2️⃣ compute volumes ----------------------------------------------
+        # 2 compute volumes ----------------------------------------------
         current_vol = int((edited_df["reps"] * edited_df["kg"]).sum())
         pct_of_goal = current_vol / target_vol if target_vol else 0
 
-        # 3️⃣ visuals -------------------------------------------------------
+        # 3 visuals -------------------------------------------------------
         col1, col2 = st.columns(2)
         col1.metric("Baseline vol", int(baseline_vol))
         col2.metric("Current vol",  current_vol,
@@ -192,4 +196,4 @@ for ex in exercises:
             st.info("⬆️ Almost there – one more rep or a tiny weight bump!")
 
         with st.expander("Optimiser phases / reasoning"):
-            st.write(opts["phases"])      # phase-by-phase bump logic
+            st.write(opts["phases"])

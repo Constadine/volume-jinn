@@ -1,11 +1,8 @@
 import math
 import requests
-from typing import Any, Dict, List, Optional, TypedDict, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-class ExerciseData(TypedDict):
-    exercise: str
-    sets: List[Tuple[int, float]]
-    volume: int
+from datatypes import ExerciseData
 
 
 class Hevy:
@@ -26,7 +23,7 @@ class Hevy:
         response = requests.get(url=url, headers=headers)
 
         if response.status_code == 401:
-            raise ValueError("Invalid API key – Hevy returned 401 Unauthorized")
+            raise ValueError("Invalid API key - Hevy returned 401 Unauthorized")
         if not response.ok:
             raise RuntimeError(f"Hevy API error {response.status_code}: {response.text[:120]}")
         try:
@@ -55,7 +52,7 @@ class Hevy:
         return unique_exercises
     
     
-    def fetch_last_workout(self, workout_title: Optional[str] = None) -> dict:
+    def fetch_last_workout(self, workout_title: Optional[str] = None) -> dict | None:
         """
         Fetch the last workout from Hevy API.
         If workout_title is provided, returns the most recent workout with that title.
@@ -85,7 +82,7 @@ class Hevy:
         return last_workout_data
     
 
-    def get_exercise_last_data(self, exercise_name: str) -> dict:
+    def get_exercise_last_data(self, exercise_name: str) -> dict | None:
         payload = self.fetch_first_page_of_data()
 
         if exercise_name not in self.all_exercises:
