@@ -22,7 +22,7 @@ with st.sidebar:
         key_input = st.text_input(
             "Gimme your key",
             type="password",              # masks the characters
-            placeholder="1a...",
+            placeholder="Paste on me...",
         )
         submit = st.form_submit_button("Use this key")
 
