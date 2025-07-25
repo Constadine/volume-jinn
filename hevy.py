@@ -94,6 +94,49 @@ class Hevy:
                         return exercise
 
 
+    def fetch_all_workouts(self, max_pages: int = 30) -> List[dict]:
+        '''
+        Retrieve the full workout history (up to `max_pages` pages).
+        '''
+        workouts: List[dict] = []
+        for page in range(1, max_pages + 1):
+            url = f'https://api.hevyapp.com/v1/workouts?page={page}'
+            headers = {'accept': 'application/json', 'api-key': self.apikey}
+            resp = requests.get(url, headers=headers)
+            if not resp.ok:
+                break
+            payload = resp.json()
+            batch = payload.get('workouts', [])
+            if not batch:
+                break
+            workouts.extend(batch)
+            if len(batch) < 10:   # reached last page
+                break
+        return workouts
+
+    def fetch_first_workout(self, workout_title: Optional[str] = None) -> Optional[dict]:
+        '''
+        Return the earliest workout – optionally filtered by title.
+        '''
+        workouts = self.fetch_all_workouts()
+        if workout_title:
+            workouts = [w for w in workouts if w['title'] == workout_title]
+        if not workouts:
+            return None
+        return workouts[-1]  # API returns newest first
+
+    def get_first_exercise_data(self, exercise_name: str) -> Optional[dict]:
+        '''
+        First ever occurrence of an exercise.
+        '''
+        workouts = self.fetch_all_workouts()
+        for wk in reversed(workouts):      # oldest → newest
+            for ex in wk['exercises']:
+                if ex['title'] == exercise_name:
+                    return ex
+        return None
+
+
     def calculate_exercise_volume(self, exercise_data: List[dict]) -> int:
         total_volume = 0
         for s in exercise_data:

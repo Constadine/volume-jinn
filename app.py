@@ -1,5 +1,8 @@
+
 import os
 from datetime import datetime
+import copy
+from typing import List, Dict
 
 import pandas as pd
 import streamlit as st
@@ -12,21 +15,17 @@ load_dotenv()
 
 st.set_page_config(page_title="Volume Jinn", page_icon="🧞")
 
-# ── 1. Ask for the key (once per browser session) ──────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
+# 🔑 0.  API‑key handling (stored only in this browser session)
+# ────────────────────────────────────────────────────────────────────────────
 if "hevy_key" not in st.session_state:
     st.session_state.hevy_key = ""
 
 with st.sidebar:
     st.markdown("### 🔑 Hevy API Key")
-    with st.form(key="key_form", clear_on_submit=False):
-        key_input = st.text_input(
-            "Gimme your key",
-            type="password",              # masks the characters
-            placeholder="Paste on me...",
-        )
-        submit = st.form_submit_button("Use this key")
-
-        if submit:
+    with st.form("key_form", clear_on_submit=False):
+        key_input = st.text_input("Gimme your key", type="password", placeholder="Paste on me…")
+        if st.form_submit_button("Use this key"):
             st.session_state.hevy_key = key_input.strip()
             if st.session_state.hevy_key:
                 st.success("Key stored for **this session** only.")
@@ -34,166 +33,168 @@ with st.sidebar:
                 st.warning("No key entered - you'll need one to proceed.")
 
 apikey = st.session_state.hevy_key or os.getenv("HEVY_API_KEY", "")
-hevy = Hevy(apikey=apikey)
+hevy   = Hevy(apikey=apikey)
 
-
-# ── 2. Refuse to proceed without a key ─────────────────────────────────────────
 if not apikey:
-    st.info(
-        "Enter your personal Hevy API key in the sidebar to load a workout. "
-        "Your key is stored **only in this browser session** and never logged."
-    )
-    st.stop()     # the sidebar prompt stays visible; nothing else renders
-
-
-st.title("Volume Jinn 🧞")
-
-# Optional: let the user decide which previous workout to pull
-
-if apikey is None:
-    st.error("Environment variable HEVY_API_KEY not found")
+    st.info("Enter your personal Hevy API key in the sidebar to load a workout. Your key is stored **only in this browser session** and never logged.")
     st.stop()
 
-# ───────────────────────── SIDEBAR ──────────────────────────
+# ────────────────────────────────────────────────────────────────────────────
+st.title("Volume Jinn 🧞")
+
+# ───────────────────────────────── SIDEBAR INPUTS ────────────────────────────
 with st.sidebar:
     search_by = st.radio("Search by", ["Workout", "Exercise"])
+
     if search_by == "Workout":
-        all_workouts = hevy.get_all_workouts()
-        workout_title = st.selectbox(
-            "Workout Title (leave empty for most recent)",
-            options=sorted(hevy.get_all_workouts()),
-            index=None,
-            placeholder="(Latest workout)"
-        )
+        workout_title = st.selectbox("Workout Title (leave empty for most recent)", options=sorted(hevy.get_all_workouts()), index=None, placeholder="(Latest workout)")
+    else:
+        exercise_titles = st.multiselect("Exercise Title", options=sorted(hevy.get_all_exercises()))
 
-        raw_wk = hevy.fetch_last_workout(workout_title or None)
-    else:  # Exercise
-        all_exercises = hevy.get_all_exercises()
-        exercise_titles = st.multiselect(
-            "Exercise Title",
-            options=sorted(all_exercises),
-            default=None
-        )
+    vol_bump_pct = st.slider("Volume increase target (%)", 0, 20, 5, 1) / 100
 
-    vol_bump_pct = st.slider(
-        "Volume increase target (%)",
-        0, 20, 5, step=1
-    ) / 100
-# ────────────────────────────────────────────────────────────
+    baseline_source = st.radio("Baseline session volume", ["First session", "Last session"], help=("*First session*: Each new workout adds a **constant** volume equal to (first_session_volume × bump %).\n*Last session*: Classic multiplicative progression (last × bump %)."))
 
-
-# ──────────────── FETCH & STRUCTURE DATA ───────────────────
+# ─────────────────────────────── DATA FETCH ─────────────────────────────────
 if search_by == "Workout":
-    # pull the most-recent workout of that title (or latest overall)
     try:
-        raw_wk = hevy.fetch_last_workout(
-            workout_title or None          # "" → None for “latest”
-        )
-        if not raw_wk:
-            st.warning("No workout found with that title.")
-            st.stop()
+        raw_wk = hevy.fetch_last_workout(workout_title or None)
     except Exception as err:
-        st.error(f"⚠️ Could not fetch workout - {err}")
+        st.error(f"API error: {err}")
+        st.stop()
+
+    if not raw_wk:
+        st.warning("No workout found with that title.")
         st.stop()
 
     exercises = hevy.structure_workout_data(raw_wk)
+    # Prefer the workout’s *performed* timestamp; fall back to creation time
+    event_ts = raw_wk.get("performed_at") or raw_wk["created_at"]
+    event_dt = datetime.fromisoformat(event_ts.replace("Z", "+00:00"))
+    # date/time of the chosen baseline session
+    if baseline_source == "First session":
+        first_wk = hevy.fetch_first_workout(workout_title or None)
+        base_ts  = (first_wk.get("performed_at") if first_wk else None) or (first_wk.get("created_at") if first_wk else event_ts)
+    else:  # baseline = last session (same as current)
+        base_ts = event_ts
+    base_dt = datetime.fromisoformat(base_ts.replace("Z", "+00:00"))
 
-    # pretty header with workout time
-    created_at = datetime.fromisoformat(
-        raw_wk["created_at"].replace("Z", "+00:00")
+    st.header(
+        f"{raw_wk['title']} · {event_dt:%B %d, %Y – %H:%M} | Baseline: {base_dt:%B %d, %Y}"
     )
-    st.header(f'{raw_wk["title"]} · {created_at:%B %d, %Y – %H:%M}')
 
-else:  # Exercise mode
-    # 1 nothing chosen yet → ask the user and stop early
+else:
     if not exercise_titles:
         st.info("👈 Pick at least one exercise to continue.")
         st.stop()
 
-    # 2 pull each exercise’s last-session data
-    exercises: list[ExerciseData] = []
-    missing:   list[str]  = []
+    exercises: List[ExerciseData] = []
+    missing:   List[str] = []
 
     for title in exercise_titles:
         try:
             raw_ex = hevy.get_exercise_last_data(title)
+            if raw_ex and not raw_ex.get("error"):
+                exercises.append(hevy.structure_exercise_data(raw_ex))
+            else:
+                missing.append(title)
         except Exception as err:
             st.error(f"API error while fetching **{title}** – {err}")
             st.stop()
 
-        if not raw_ex or raw_ex.get("error"):
-            missing.append(title)
-            continue
-
-        exercises.append(hevy.structure_exercise_data(raw_ex))
-
-    # 3 if none of the chosen items came back with data
     if not exercises:
         st.warning("No recent data found for the selected exercise(s).")
         st.stop()
 
-    # 4 tell me which ones were skipped
     if missing:
         st.warning("No recent session found for: " + ", ".join(missing))
 
-    # 5 header
-    st.header(
-        "Last session · " +
-        (", ".join(exercise_titles) if len(exercise_titles) <= 3 else
-         f"{len(exercise_titles)} exercises")
-    )
+    hdr = ", ".join(exercise_titles) if len(exercise_titles) <= 3 else f"{len(exercise_titles)} exercises"
+    st.header(f"Last session · {hdr}")
+
+# ──────────────────────────── UTILITY FUNCTIONS ─────────────────────────────
+
+def calc_volume(sets):
+    return sum((s.get("weight_kg", 0) or 0) * (s.get("reps", 0) or 0) for s in sets)
 
 
-# ────────────────────────────────────────────────────────────
+def simple_increment_plan(original_sets, target_volume):
+    plan = copy.deepcopy(original_sets)
+    for s in plan:
+        s["reps"] = int(s.get("reps", 0))
+        s["weight_kg"] = s.get("weight_kg") or 0
+    guard = 0
+    while calc_volume(plan) < target_volume and guard < 200:
+        idx = max(range(len(plan)), key=lambda i: plan[i]["weight_kg"])
+        plan[idx]["reps"] += 1
+        guard += 1
+    return plan
 
+# ──────────────────────── CACHED FIRST‑VOL LOOKUP ───────────────────────────
 
-# ──-- One expander per exercise --──
+@st.cache_data(show_spinner=False)
+def get_first_vol_map(names: tuple) -> Dict[str, int]:
+    """Return {exercise → first‑session volume} with one API sweep per rerun."""
+    vol_map = {}
+    for n in names:
+        first_data = hevy.get_first_exercise_data(n)
+        vol_map[n] = calc_volume(first_data["sets"]) if first_data else None
+    return vol_map
+
+first_vol_map = get_first_vol_map(tuple(e["exercise"] for e in exercises)) if baseline_source == "First session" else {}
+
+# ───────────────────────────── MAIN LOOP ────────────────────────────────────
 for ex in exercises:
     name          = ex["exercise"]
     original_sets = ex["sets"]
-    opts = hevy.get_optimized_options(
-        {"exercise": name, "sets": original_sets},
-        volume_perc = vol_bump_pct          # e.g. +5 %
-    )
-    plan_sets    = opts["final_sets"]
-    target_vol   = int(opts["target_volume"])
-    baseline_vol = int(ex["volume"])        # what I lifted last time
+    last_vol      = ex["volume"] or 1
 
+    # ── baseline + targets --------------------------------------------------
+    if baseline_source == "First session":
+        baseline_vol = first_vol_map.get(name) or last_vol
+        absolute_increment = baseline_vol * vol_bump_pct
+        target_vol         = last_vol + absolute_increment
+    else:
+        baseline_vol       = last_vol
+        target_vol         = last_vol * (1 + vol_bump_pct)
+        absolute_increment = target_vol - last_vol
+
+    effective_bump_pct = max((target_vol / last_vol) - 1, 0)
+
+    # ── plan generation -----------------------------------------------------
+    try:
+        opts      = hevy.get_optimized_options({"exercise": name, "sets": original_sets}, volume_perc=effective_bump_pct)
+        plan_sets = opts.get("final_sets") or original_sets
+        reasoning = opts.get("phases", "(no optimiser output)")
+    except Exception:
+        plan_sets = simple_increment_plan(original_sets, target_vol)
+        reasoning = "Fallback heuristic plan (Hevy optimiser failed)"
+
+    # ── UI ------------------------------------------------------------------
     with st.expander(name, expanded=True):
-        preset = st.radio(
-            "Start the editor with…",
-            ["Optimised plan", "Last session"],
-            horizontal=True,
-            key=f"preset_{name}"
-        )
+        preset = st.radio("Start the editor with…", ["Last session", "Optimised plan"], horizontal=True, key=f"preset_{name}")
 
-        # default rows → either the plan or the old sets
-        default_rows = plan_sets if preset == "Optimised plan" else original_sets
-        df  = pd.DataFrame(default_rows, columns=["reps", "kg"])
+        df_default = plan_sets if preset == "Optimised plan" else original_sets
+        df         = pd.DataFrame(df_default, columns=["reps", "kg"])
+        edited_df  = st.data_editor(df, num_rows="dynamic", key=f"de_{name}")
 
-        edited_df = st.data_editor(
-            df,
-            num_rows="dynamic",
-            key=f"de_{name}"
-        )
-
-        # 2 compute volumes ----------------------------------------------
         current_vol = int((edited_df["reps"] * edited_df["kg"]).sum())
+        diff_vol    = target_vol - current_vol
         pct_of_goal = current_vol / target_vol if target_vol else 0
 
-        # 3 visuals -------------------------------------------------------
-        col1, col2 = st.columns(2)
-        col1.metric("Baseline vol", int(baseline_vol))
-        col2.metric("Current vol",  current_vol,
-                    delta=f"{pct_of_goal*100:.1f}% of target")
+        cols = st.columns(3)
+        cols[0].metric("Baseline vol", int(baseline_vol))
+        cols[1].metric("Target vol", int(target_vol))
+        cols[2].metric("Current vol", current_vol, delta=f"{round(diff_vol,1):+} vol")
 
-        st.progress(min(pct_of_goal, 1.0),
-                    text=f"{current_vol} / {int(target_vol)} kg·reps")
+        st.progress(min(pct_of_goal, 1.0), text=f"{current_vol} / {int(target_vol)} vol")
 
-        if current_vol >= target_vol:
-            st.success("🎯 Target volume reached!")
-        elif pct_of_goal >= 0.9:
-            st.info("⬆️ Almost there – one more rep or a tiny weight bump!")
+        if diff_vol > 0:
+            st.write(f"⬆️ Add {(diff_vol)} vol more to hit your target.")
+        elif diff_vol < 0:
+            st.write(f"✅ Surpassed target by {abs(diff_vol)} vol")
+        else:
+            st.write("🎉 Damn exactly.")
 
         with st.expander("Optimiser phases / reasoning"):
-            st.write(opts["phases"])
+            st.write(reasoning)
